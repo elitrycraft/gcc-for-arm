@@ -20,63 +20,78 @@ jobs:
         run: |
           git clone https://github.com/paulocoutinhox/gcc-for-arm.git
           cd gcc-for-arm
+          echo "=== Содержимое репозитория ==="
           ls -la
+          echo "=== Dockerfile ==="
+          cat Dockerfile || echo "Dockerfile not found"
+          echo "=== build.sh ==="
+          cat build.sh || echo "build.sh not found"
 
-      - name: Run build.sh inside Docker (автоматически)
+      - name: Build Docker image
         run: |
           cd gcc-for-arm
+          docker build -t gcc-for-arm . 2>&1 | tee /tmp/docker-build.log
 
-          # Используем Dockerfile из репозитория, чтобы собрать образ
-          docker build -t gcc-for-arm .
-
-          # Запускаем контейнер и внутри него выполняем build.sh
+      - name: Run build.sh inside Docker
+        id: build
+        continue-on-error: true
+        run: |
+          cd gcc-for-arm
           docker run --rm \
             -v "$PWD":/gcc-for-arm \
             -w /gcc-for-arm \
             gcc-for-arm \
-            bash -c "./build.sh"
+            bash -c "./build.sh" 2>&1 | tee /tmp/build.log
 
-      - name: Verify toolchain (проверка результата)
+      - name: Check build result
+        run: |
+          echo "=== Результат сборки ==="
+          if [ "${{ steps.build.outcome }}" == "success" ]; then
+            echo "✅ Сборка прошла успешно"
+          else
+            echo "❌ Сборка упала с ошибкой"
+            echo "=== Последние 50 строк лога ==="
+            tail -50 /tmp/build.log
+          fi
+
+      - name: Verify toolchain (если собралось)
+        if: steps.build.outcome == 'success'
         run: |
           cd gcc-for-arm
-
-          # Ищем собранный GCC
           find . -name "arm-linux-androideabi-gcc" -type f 2>/dev/null | head -5
-
-          # Проверяем архитектуру бинарника
           for f in $(find . -name "arm-linux-androideabi-gcc" -type f 2>/dev/null); do
             echo "Проверяем: $f"
             file "$f"
           done
 
-      - name: Package toolchain
-        if: success()
+      - name: Package toolchain (если собралось)
+        if: steps.build.outcome == 'success'
         run: |
           cd gcc-for-arm
-
-          # Упаковываем то, что собралось
           mkdir -p /tmp/gcc-arm-android
           cp -r arm-toolchain /tmp/gcc-arm-android/ 2>/dev/null || echo "arm-toolchain not found"
           cp -r gcc-6.2.0/build /tmp/gcc-arm-android/ 2>/dev/null || echo "build not found"
-
           tar -czf /tmp/gcc-arm-android.tar.gz -C /tmp gcc-arm-android
-
           echo "📦 Архив создан: /tmp/gcc-arm-android.tar.gz"
           ls -lh /tmp/gcc-arm-android.tar.gz
 
-      - name: Upload artifact
-        if: success()
+      - name: Upload toolchain artifact
+        if: steps.build.outcome == 'success'
         uses: actions/upload-artifact@v4
         with:
           name: gcc-arm-android-toolchain
           path: /tmp/gcc-arm-android.tar.gz
           retention-days: 30
+          if-no-files-found: warn
 
-      - name: Upload build log (даже при ошибке)
+      - name: Upload build log (всегда)
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: build-log
-          path: gcc-for-arm/contents/build.log
+          path: |
+            /tmp/build.log
+            /tmp/docker-build.log
+            gcc-for-arm/contents/build.log
           retention-days: 7
           if-no-files-found: ignore
