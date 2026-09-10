@@ -1,0 +1,82 @@
+name: Build GCC for ARM Android (Docker)
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  build-gcc:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Clone gcc-for-arm
+        run: |
+          git clone https://github.com/paulocoutinhox/gcc-for-arm.git
+          cd gcc-for-arm
+          ls -la
+
+      - name: Run build.sh inside Docker (автоматически)
+        run: |
+          cd gcc-for-arm
+
+          # Используем Dockerfile из репозитория, чтобы собрать образ
+          docker build -t gcc-for-arm .
+
+          # Запускаем контейнер и внутри него выполняем build.sh
+          docker run --rm \
+            -v "$PWD":/gcc-for-arm \
+            -w /gcc-for-arm \
+            gcc-for-arm \
+            bash -c "./build.sh"
+
+      - name: Verify toolchain (проверка результата)
+        run: |
+          cd gcc-for-arm
+
+          # Ищем собранный GCC
+          find . -name "arm-linux-androideabi-gcc" -type f 2>/dev/null | head -5
+
+          # Проверяем архитектуру бинарника
+          for f in $(find . -name "arm-linux-androideabi-gcc" -type f 2>/dev/null); do
+            echo "Проверяем: $f"
+            file "$f"
+          done
+
+      - name: Package toolchain
+        if: success()
+        run: |
+          cd gcc-for-arm
+
+          # Упаковываем то, что собралось
+          mkdir -p /tmp/gcc-arm-android
+          cp -r arm-toolchain /tmp/gcc-arm-android/ 2>/dev/null || echo "arm-toolchain not found"
+          cp -r gcc-6.2.0/build /tmp/gcc-arm-android/ 2>/dev/null || echo "build not found"
+
+          tar -czf /tmp/gcc-arm-android.tar.gz -C /tmp gcc-arm-android
+
+          echo "📦 Архив создан: /tmp/gcc-arm-android.tar.gz"
+          ls -lh /tmp/gcc-arm-android.tar.gz
+
+      - name: Upload artifact
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gcc-arm-android-toolchain
+          path: /tmp/gcc-arm-android.tar.gz
+          retention-days: 30
+
+      - name: Upload build log (даже при ошибке)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log
+          path: gcc-for-arm/contents/build.log
+          retention-days: 7
+          if-no-files-found: ignore
