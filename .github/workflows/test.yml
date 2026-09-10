@@ -10,13 +10,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Clone gcc-for-arm
+      - name: Clone gcc-for-arm (ОРИГИНАЛ, а не форк)
         run: |
           git clone https://github.com/paulocoutinhox/gcc-for-arm.git
           cd gcc-for-arm
@@ -26,6 +20,11 @@ jobs:
           cat Dockerfile || echo "Dockerfile not found"
           echo "=== build.sh ==="
           cat build.sh || echo "build.sh not found"
+          echo "=== run.sh ==="
+          cat run.sh || echo "run.sh not found"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
 
       - name: Build Docker image
         run: |
@@ -51,14 +50,14 @@ jobs:
           else
             echo "❌ Сборка упала с ошибкой"
             echo "=== Последние 50 строк лога ==="
-            tail -50 /tmp/build.log
+            tail -50 /tmp/build.log || echo "лог не найден"
           fi
 
       - name: Verify toolchain (если собралось)
         if: steps.build.outcome == 'success'
         run: |
           cd gcc-for-arm
-          find . -name "arm-linux-androideabi-gcc" -type f 2>/dev/null | head -5
+          find . -name "*gcc*" -type f 2>/dev/null | head -20
           for f in $(find . -name "arm-linux-androideabi-gcc" -type f 2>/dev/null); do
             echo "Проверяем: $f"
             file "$f"
@@ -70,7 +69,8 @@ jobs:
           cd gcc-for-arm
           mkdir -p /tmp/gcc-arm-android
           cp -r arm-toolchain /tmp/gcc-arm-android/ 2>/dev/null || echo "arm-toolchain not found"
-          cp -r gcc-6.2.0/build /tmp/gcc-arm-android/ 2>/dev/null || echo "build not found"
+          cp -r gcc-6.2.0 /tmp/gcc-arm-android/ 2>/dev/null || echo "gcc-6.2.0 not found"
+          cp -r contents /tmp/gcc-arm-android/ 2>/dev/null || echo "contents not found"
           tar -czf /tmp/gcc-arm-android.tar.gz -C /tmp gcc-arm-android
           echo "📦 Архив создан: /tmp/gcc-arm-android.tar.gz"
           ls -lh /tmp/gcc-arm-android.tar.gz
@@ -92,6 +92,5 @@ jobs:
           path: |
             /tmp/build.log
             /tmp/docker-build.log
-            gcc-for-arm/contents/build.log
           retention-days: 7
           if-no-files-found: ignore
